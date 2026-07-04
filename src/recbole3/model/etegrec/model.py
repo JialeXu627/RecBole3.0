@@ -251,8 +251,8 @@ class ETEGRecModel(BaseRetrievalModel):
         _, _, _, _, seq_code_logits = self._rqvae_module().rq(forward_outputs.seq_project_latents)
         first_indices = self._first_occurrence_indices(target_flatten)
 
-        seq_unique_logits = seq_code_logits[first_indices]
-        target_unique_logits = target_code_logits[first_indices]
+        seq_unique_logits = -seq_code_logits[first_indices]
+        target_unique_logits = -target_code_logits[first_indices]
         kl_loss = self.compute_discrete_contrastive_loss_kl(seq_unique_logits, target_unique_logits)
         kl_loss = kl_loss + self.compute_discrete_contrastive_loss_kl(target_unique_logits, seq_unique_logits)
 

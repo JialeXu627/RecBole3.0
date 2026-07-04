@@ -466,7 +466,7 @@ class ETEGRecTrainer(Trainer):
             return None
         scheduler_name = str(scheduler_type).strip().lower()
         if scheduler_name not in {"cosine", "linear", "constant"}:
-            raise ValueError(f"Unsupported ETEGRec lr_scheduler_type: {self.config.lr_scheduler_type!r}")
+            raise ValueError(f"Unsupported ETEGRec scheduler_type: {scheduler_type!r}")
         return get_scheduler(
             name=scheduler_name,
             optimizer=optimizer,
