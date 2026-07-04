@@ -74,6 +74,12 @@ from recbole3.model.rearec import (
     ReaRecModelDataset,
     ReaRecTrainer,
 )
+from recbole3.model.llamarec import (
+    LlamaRecConfig,
+    LlamaRecModel,
+    LlamaRecTrainer,
+    LlamaRecTrainerConfig,
+)
 from recbole3.model.lrurec import (
     LRURecConfig,
     LRURecModel,
@@ -234,6 +240,12 @@ MODEL_TABLE: dict[str, ModelSpec] = {
         pipeline_cls=LazyImport("recbole3.model.llmrank.pipeline", "LLMRankPipeline"),
     ),
 
+    "llamarec": ModelSpec(
+        model_cls=LlamaRecModel,
+        config_cls=LlamaRecConfig,
+        trainer_config_cls=LlamaRecTrainerConfig,
+        pipeline_cls=LazyImport("recbole3.model.llamarec.pipeline", "LlamaRecPipeline"),
+    ),
     "lrurec": ModelSpec(
         model_cls=LRURecModel,
         config_cls=LRURecConfig,
@@ -334,6 +346,10 @@ __all__ = [
     "LSRMModelDataset",
     "LLMRankModel",
     "LLMRankModelDataset",
+    "LlamaRecConfig",
+    "LlamaRecModel",
+    "LlamaRecTrainer",
+    "LlamaRecTrainerConfig",
     "LRURecConfig",
     "LRURecModel",
     "LRURecModelDataset",
