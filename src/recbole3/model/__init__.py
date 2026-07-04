@@ -68,12 +68,18 @@ from recbole3.model.llmrank import (
     LLMRankModelDataset,
 )
 from recbole3.model.llmrank.trainer import LLMRankTrainer, LLMRankTrainerConfig
-
 from recbole3.model.rearec import (
     ReaRecConfig,
     ReaRecModel,
     ReaRecModelDataset,
     ReaRecTrainer,
+)
+from recbole3.model.lrurec import (
+    LRURecConfig,
+    LRURecModel,
+    LRURecModelDataset,
+    LRURecTrainer,
+    LRURecTrainerConfig,
 )
 from recbole3.model.minionerec.config import MiniOneRecConfig
 from recbole3.model.rankmixer import (
@@ -227,6 +233,15 @@ MODEL_TABLE: dict[str, ModelSpec] = {
         trainer_config_cls=LLMRankTrainerConfig,
         pipeline_cls=LazyImport("recbole3.model.llmrank.pipeline", "LLMRankPipeline"),
     ),
+
+    "lrurec": ModelSpec(
+        model_cls=LRURecModel,
+        config_cls=LRURecConfig,
+        model_data_cls=LRURecModelDataset,
+        trainer_cls=LRURecTrainer,
+        trainer_config_cls=LRURecTrainerConfig,
+        pipeline_cls=Pipeline,
+    ),
     "minionerec": ModelSpec(
         model_cls=LazyImport("transformers", "PreTrainedModel"),
         config_cls=MiniOneRecConfig,
@@ -319,6 +334,11 @@ __all__ = [
     "LSRMModelDataset",
     "LLMRankModel",
     "LLMRankModelDataset",
+    "LRURecConfig",
+    "LRURecModel",
+    "LRURecModelDataset",
+    "LRURecTrainer",
+    "LRURecTrainerConfig",
     "MODEL_TABLE",
     "RANKMIXER_FEATURES",
     "RQVAEConfig",
