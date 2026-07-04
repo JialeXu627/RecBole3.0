@@ -4,7 +4,8 @@ import inspect
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Literal, Mapping, Sequence
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator, Literal, Mapping, Sequence
 
 import torch
 from torch.optim import Optimizer
@@ -66,8 +67,25 @@ class Trainer:
         self._logger.log_dataset_info(prepared_data)
         self._logger.log_model_info(model)
 
+    @staticmethod
+    def _reset_accelerator_state() -> None:
+        try:
+            from accelerate.state import AcceleratorState
+        except ModuleNotFoundError:
+            return
+
+        shared_state = getattr(AcceleratorState, "_shared_state", None)
+        reset_state = getattr(AcceleratorState, "_reset_state", None)
+        if shared_state and callable(reset_state):
+            reset_state()
+
     def create_accelerator(self) -> Any:
         from accelerate import Accelerator
+        from accelerate.state import AcceleratorState
+
+        # # GRPO 等流程在 accelerate launch 下已初始化 AcceleratorState；再 new Accelerator() 会报错。
+        # if AcceleratorState._shared_state:
+        #     return _ExistingAcceleratorEvalContext()
 
         return Accelerator(
             mixed_precision=self.config.mixed_precision,
@@ -173,12 +191,15 @@ class Trainer:
             epoch_start = time.perf_counter()
             model.train()
             losses: list[float] = []
-            progress_bar = self._create_train_progress_bar(train_dataloader, epoch=epoch, max_epochs=int(self.config.max_epochs))
+            progress_bar = self._create_train_progress_bar(train_dataloader, epoch=epoch, 
+                                                           max_epochs=int(self.config.max_epochs), 
+                                                           disable=not accelerator.is_main_process)
             for batch in progress_bar:
                 with accelerator.accumulate(model):
                     optimizer.zero_grad()
                     outputs = model.forward(batch)
-                    loss = model.compute_loss(batch, outputs)
+                    unwrap_model = accelerator.unwrap_model(model)
+                    loss = unwrap_model.compute_loss(batch, outputs)
                     accelerator.backward(loss)
                     optimizer.step()
                     if scheduler is not None and scheduler_interval == "step":
@@ -329,6 +350,9 @@ class Trainer:
             if best_checkpoint:
                 state_dict = torch.load(best_checkpoint, map_location="cpu", weights_only=True)
                 model.load_state_dict(state_dict)
+            # fit() leaves AcceleratorState initialized; post-training evaluate() must
+            # create a fresh Accelerator so eval batches are placed on the model device.
+            self._reset_accelerator_state()
             print("[trainer] starting test evaluation")
             test_result = self.evaluate(model, prepared_data, split="test")
             print("[trainer] finished test evaluation")
@@ -374,7 +398,7 @@ class Trainer:
         scoring_model = accelerator.unwrap_model(prepared_model)
         batch_eval_data: list[Any] = []
         num_batches = 0
-        progress_bar = self._create_progress_bar(eval_dataloader, split=split)
+        progress_bar = self._create_progress_bar(eval_dataloader, split=split, disable=not accelerator.is_main_process)
         with torch.no_grad():
             for model_inputs, records in progress_bar:
                 batch_eval_data.append(self._collect_eval_batch(method, scoring_model, model_inputs, records))
@@ -606,23 +630,23 @@ class Trainer:
         return "{ " + ", ".join(parts) + " }"
 
     @staticmethod
-    def _create_progress_bar(eval_dataloader: DataLoader, *, split: str) -> Any:
+    def _create_progress_bar(eval_dataloader: DataLoader, *, split: str, disable: bool = False) -> Any:
         description = f"[eval:{split}]"
         try:
             from tqdm.auto import tqdm
 
-            return tqdm(eval_dataloader, desc=description, total=len(eval_dataloader), leave=True)
+            return tqdm(eval_dataloader, desc=description, total=len(eval_dataloader), leave=True, disable=disable)
         except ModuleNotFoundError:
             print(f"{description} progress logging enabled without tqdm; total_batches={len(eval_dataloader)}")
             return eval_dataloader
 
     @staticmethod
-    def _create_train_progress_bar(train_dataloader: DataLoader, *, epoch: int, max_epochs: int) -> Any:
+    def _create_train_progress_bar(train_dataloader: DataLoader, *, epoch: int, max_epochs: int, disable: bool) -> Any:
         description = f"[train:{epoch}/{max_epochs}]"
         try:
             from tqdm.auto import tqdm
 
-            return tqdm(train_dataloader, desc=description, total=len(train_dataloader), leave=True)
+            return tqdm(train_dataloader, desc=description, total=len(train_dataloader), leave=True, disable=disable)
         except ModuleNotFoundError:
             print(f"{description} progress logging enabled without tqdm; total_batches={len(train_dataloader)}")
             return train_dataloader
@@ -632,6 +656,49 @@ class Trainer:
         if not values:
             return None
         return float(sum(values) / len(values))
+
+
+class _ExistingAcceleratorEvalContext:
+    """Evaluation helper when AcceleratorState is already initialized (e.g. post-GRPO on rank 0)."""
+
+    @property
+    def device(self) -> torch.device:
+        from accelerate.state import AcceleratorState
+
+        return AcceleratorState().device
+
+    @property
+    def is_main_process(self) -> bool:
+        from accelerate import PartialState
+
+        return PartialState().is_main_process
+
+    def wait_for_everyone(self) -> None:
+        import torch.distributed as distributed
+
+        if distributed.is_available() and distributed.is_initialized():
+            distributed.barrier()
+
+    def prepare(self, *args: Any) -> Any:
+        if len(args) == 1:
+            return args[0]
+        model, dataloader = args
+        return model, dataloader
+
+    @staticmethod
+    def unwrap_model(model: Any) -> Any:
+        return model
+
+    @contextmanager
+    def accumulate(self, model: Any) -> Iterator[None]:
+        yield
+
+    def backward(self, loss: torch.Tensor, **kwargs: Any) -> None:
+        loss.backward(**kwargs)
+
+    @staticmethod
+    def print(*args: Any, **kwargs: Any) -> None:
+        print(*args, **kwargs)
 
 
 __all__ = [
